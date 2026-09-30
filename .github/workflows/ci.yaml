@@ -1,0 +1,53 @@
+name: CI
+permissions:
+    contents: read       # 只需读仓库代码
+    # push/pull-request 若要用再单独给最小范围
+    # 防第三方 action / 恶意 PR 借你的 token 干越权事（安全基线的一部分）。进阶课时 09 发布用 OIDC 也是同一思想：最小权限
+
+on:
+  push:
+    branches: [main]        # main 分支推送时跑
+  pull_request:             # 任何 PR 都跑
+
+jobs:
+  quality:                  # 任务1：静态质量
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6   # 装 uv（自动带缓存）
+        with:
+          python-version: "3.12"
+
+      - name: 按锁文件安装依赖
+        run: uv sync --frozen
+        # `--frozen` = "锁死，不许动 lock"；这正是"CI 与本地完全一致"的最后一颗螺丝。
+
+      - name: 格式检查
+        run: uv run ruff format --check .
+
+      - name: Lint 检查
+        run: uv run ruff check .
+
+      - name: 类型检查
+        run: uv run mypy src
+
+  test:                     # 任务2：测试（多版本矩阵）
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        # 矩阵 = 在同一份代码上，用 3.11/3.12/3.13 各装一次 + 各跑一遍，
+        # **验证代码在"别人不同版本的环境"里也真能过**。这才是 CI"替你把关"的核心价值。
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - run: uv sync --frozen
+      - name: 跑测试（含覆盖率门禁）
+        run: uv run pytest
+
+      - name: 上传覆盖率报告（可选，需 codecov 账号）
+        uses: codecov/codecov-action@v5
